@@ -79,41 +79,51 @@ def make_model(params, output_bias=None):
                                     tf.keras.layers.Flatten(),
                                     tf.keras.layers.Dense(units=params['units'],activation = 'relu'),
                                     tf.keras.layers.Dense(units=params['units'],activation='relu'),
-                                    tf.keras.layers.Dropout(0.2),
+                                    tf.keras.layers.Dropout(rate=params['fc_dropout_drop_proba']),
                                     tf.keras.layers.Dense(1, activation=params['activation'],bias_initializer=output_bias),
     ])
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(lr=1e-1),
+        optimizer=tf.keras.optimizers.Adam(lr=params['lr_rate_mult']),
         loss=tf.keras.losses.BinaryCrossentropy(),
         metrics=metrics)
-    return model
+
+    # es=tf.keras.callbacks.EarlyStopping(monitor='val_loss',patience=10,verbose=1,mode='min',
+    #                                                 restore_best_weights=True)
+
+    #best_model=tf.keras.callbacks.ModelCheckpoint(filepath='best_model.h5',monitor='val_loss',save_best_only=True,verbose=1)
+
+    result = model.fit(train_input_fn, validation_data = val_input_fn, epochs=100,steps_per_epoch = 200,
+                              validation_steps = 50, verbose = 1)#, callbacks=[es])
+
+    validation_loss = np.amin(result.history['val_loss'])
+    return {'loss': validation_loss,
+            'status': STATUS_OK,
+            'model': model,
+            'params': params}
 
 space = {
     'lr_rate_mult': hp.loguniform('lr_rate_mult', -0.5, 0.5),
     # L2 weight decay:
-    'l2_weight_reg_mult': hp.loguniform('l2_weight_reg_mult', -1.3, 1.3),
+    #'l2_weight_reg_mult': hp.loguniform('l2_weight_reg_mult', -1.3, 1.3),
     #node:
-    'units'      : scope.int(hp.quniform('units',22,68,4)),
+    'units': scope.int(hp.quniform('units',22,68,2)),
     # Batch size fed for each gradient update
-    'batch_size': hp.quniform('batch_size', 100, 450, 5),
+    #'batch_size': hp.quniform('batch_size', 100, 450, 5),
     # Choice of optimizer:
-    'optimizer': hp.choice('optimizer', ['Adam', 'Nadam', 'RMSprop']),
+    #'optimizer': hp.choice('optimizer', ['Adam', 'Nadam', 'RMSprop']),
     # Coarse labels importance for weights updates:
-    'coarse_labels_weight': hp.uniform('coarse_labels_weight', 0.1, 0.7),
+    # 'coarse_labels_weight': hp.uniform('coarse_labels_weight', 0.1, 0.7),
     # Uniform distribution in finding appropriate dropout values, FC layers
-    'fc_dropout_drop_proba': hp.uniform('fc_dropout_proba', 0.0, 0.6),
+    'fc_dropout_drop_proba': hp.uniform('fc_dropout_drop_proba', 0.0, 0.6),
     # Use batch normalisation at more places?
-    'use_BN': hp.choice('use_BN', [False, True]),
+    #'use_BN': hp.choice('use_BN', [False, True]),
     # Use activation everywhere?
     'activation': hp.choice('activation', ['relu', 'elu'])
 }
 
-# Stop training if 'val_loss' stops improving for over 10 epochs
-early_stopping=tf.keras.callbacks.EarlyStopping(monitor='val_loss',patience=10,verbose=1,mode='min',
-                                                restore_best_weights=True)
-
-# Save the best model to .h5 file
-best_model=tf.keras.callbacks.ModelCheckpoint(filepath='best_model.h5',monitor='val_loss',save_best_only=True,verbose=1)
-
-model.fit(train_input_fn, validation_data = val_input_fn, epochs=100,steps_per_epoch = 200, validation_steps = 50)
-model.summary()
+trials = Trials()
+best = fmin(make_model,
+            space,
+            algo=tpe.suggest,
+            max_evals=50,
+            trials=trials)
